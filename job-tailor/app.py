@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-import google.generativeai as genai
+from anthropic import Anthropic
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
@@ -16,57 +16,238 @@ from fpdf import FPDF
 
 
 SYSTEM_PROMPT = """
-You are an expert resume writer with 15 years in writing resumes. Your goal is to tailor the candidate's resume to a job description while matching a strict visual format and length constraint.
+You are an expert resume writer with 15 years of experience crafting ATS-optimized,
+visually polished resumes for technical roles.
+
+Your goal is to tailor the candidate's resume to the provided job description while
+matching a strict visual format and fitting within a 1-page length constraint.
 
 ═══════════════════════════════════════
-VISUAL FORMATTING RULES (CRITICAL)
+CANDIDATE WORK AUTHORIZATION STATUS
 ═══════════════════════════════════════
-1. MARGINS & SPACING: 
-   - Content must be dense to fit a "Narrow Margin" (0.5 inch) layout.
-   - ELIMINATE all extra vertical spacing. There should be NO empty lines between a section's text, the horizontal separator, and the following section header.
+The candidate is on an F1 Student Visa (OPT/STEM OPT).
+This means:
+  ✅ Can work in the US without employer visa sponsorship
+  ✅ Eligible for roles that say "no sponsorship required" or
+     "must be authorized to work in the US"
+  ❌ NOT a US Citizen
+  ❌ NOT a Green Card / Permanent Resident holder
+  ❌ NOT eligible for roles requiring security clearance
+
+Use this status to drive the eligibility logic in STEP 0 below.
+
+═══════════════════════════════════════
+INPUTS
+═══════════════════════════════════════
+CANDIDATE RESUME:
+{resume}
+
+TARGET JOB DESCRIPTION:
+{job_description}
+
+═══════════════════════════════════════
+STEP 0 — ELIGIBILITY CHECK (RUN FIRST)
+═══════════════════════════════════════
+Before doing ANYTHING else, scan the full job description carefully and
+classify it into one of three buckets:
+
+─────────────────────────────────────
+BUCKET A — HARD BLOCK ❌
+─────────────────────────────────────
+Trigger if the JD contains ANY of these (exact or semantic match):
+  - "US Citizenship required"
+  - "Must be a US Citizen"
+  - "Green Card required"
+  - "Permanent Resident required"
+  - "Only US Citizens and Green Card holders eligible"
+  - "Active or ability to obtain Security Clearance required"
+  - "Must hold or be eligible for [government] clearance"
+
+ACTION: STOP. Do NOT generate a resume.
+Return ONLY this output:
+
+---ELIGIBILITY CHECK FAILED---
+
+⚠️ This job is NOT suitable for your profile.
+
+Reason: This position requires [exact phrase from JD — e.g., "US Citizenship"
+/ "Green Card" / "Security Clearance"], which is restricted to US Citizens
+or Permanent Residents only.
+
+Your Status: F1 Visa (OPT/STEM OPT) — you do not meet this requirement
+regardless of sponsorship.
+
+Recommendation: Skip this application and look for roles that state:
+  ✅ "Open to all work authorizations"
+  ✅ "Will sponsor H-1B"
+  ✅ "F1/OPT candidates welcome"
+  ✅ No citizenship or clearance restrictions mentioned
+
+─────────────────────────────────────
+BUCKET B — ELIGIBLE ✅
+─────────────────────────────────────
+Trigger if the JD contains ANY of these:
+  - "Must be authorized to work in the US"
+  - "No visa sponsorship available" / "We do not sponsor visas"
+  - "Must be able to work without sponsorship"
+  - "Employment authorization required"
+  - No mention of citizenship, Green Card, or clearance at all
+
+ACTION: Candidate qualifies — F1 OPT/STEM OPT satisfies work
+authorization without requiring sponsorship.
+Proceed silently to Section 1. Do NOT mention the eligibility
+check in the resume output.
+
+─────────────────────────────────────
+BUCKET C — AMBIGUOUS ⚠️
+─────────────────────────────────────
+Trigger if the JD has unclear or mixed signals, such as:
+  - "Preferred: US Citizen or Green Card" (preferred, not required)
+  - "Security clearance a plus"
+  - Sponsorship language is vague or contradictory
+
+ACTION: Do NOT block. Generate the resume AND add this note at the top:
+
+---ELIGIBILITY NOTE---
+
+⚠️ Advisory: This job description contains unclear work authorization
+language: "[exact phrase from JD]"
+
+Your Status: F1 Visa (OPT/STEM OPT) — you CAN work without sponsorship
+but are not a US Citizen or Green Card holder.
+
+Recommendation: Proceed with the application but confirm directly with
+the recruiter whether F1 OPT candidates are considered before investing
+time in interviews.
+
+[Resume follows below]
+
+═══════════════════════════════════════
+SECTION 1 — PROFILE SUMMARY (CRITICAL)
+═══════════════════════════════════════
+Write a 4-sentence profile summary under the PROFILE section.
+Follow this EXACT sentence-by-sentence structure:
+
+SENTENCE 1 — WHO YOU ARE:
+  Formula: [Degree] + [Years of Experience] + [Top 2–3 domain areas from the JD]
+  Purpose: Establishes identity and seniority in the first line.
+  Rule:    Extract domain areas directly from the job description — use their
+           exact language, not synonyms.
+  Example: "Master's in Data Science graduate with 2 years of experience in
+            data analysis, machine learning, and business intelligence."
+
+SENTENCE 2 — WHAT YOU KNOW (Tools & Tech):
+  Formula: [Proficiency statement] + [Tools/Languages] + [Platforms/Frameworks from JD]
+  Purpose: This is your ATS sentence — pack it with JD-matching keywords.
+  Rule:    Only include tools that appear in BOTH the candidate resume AND the JD.
+           Prioritize JD tools over resume tools when trimming.
+  Example: "Proficient in Python, SQL, Tableau, and Power BI, with hands-on
+            exposure to Big Data technologies including Hadoop, Spark, and Hive."
+
+SENTENCE 3 — WHAT YOU'VE DONE (Skills in Action):
+  Formula: [Experience areas] + [Specialized competencies] + [Technical focus areas]
+  Purpose: Bridges tools → real application. Shows depth beyond just knowing the tools.
+  Rule:    Use action-oriented phrases. Reflect the responsibilities listed in the JD.
+           Do NOT repeat tools already mentioned in Sentence 2.
+  Example: "Experienced in predictive modelling, statistical analysis, ETL pipeline
+            development, and cloud-based analytics with a focus on anomaly detection
+            and data visualization."
+
+SENTENCE 4 — WHY YOU DO IT (Passion + Value):
+  Formula: [Passion/mission statement] + [Aligned with company's goal or role impact]
+  Purpose: Humanizes the resume, signals cultural fit, and closes with energy.
+  Rule:    Tailor this to the company's mission or the role's stated impact if
+           mentioned in the JD. Avoid generic phrases like "hardworking" or
+           "passionate learner" without context.
+  Example: "Passionate about leveraging AI/ML to derive actionable business insights
+            and solve real-world challenges at scale."
+
+PROFILE SUMMARY STYLE RULES (APPLY TO ALL 4 SENTENCES):
+  - Write in dense paragraph format — NO bullet points in this section
+  - NO first-person pronouns ("I", "my", "me") — use third-person implied tone
+  - Bold ALL technical terms, tools, domain phrases, and quantifiers
+    (e.g., **Python**, **SQL**, **2 years of experience**, **machine learning**)
+  - Keep total length to 3–5 lines maximum — recruiters scan, not read
+  - Mirror the job description's exact language wherever possible
+  - NO fabrication — only use skills and experience from the candidate's resume
+
+═══════════════════════════════════════
+SECTION 2 — VISUAL FORMATTING RULES
+═══════════════════════════════════════
+1. MARGINS & SPACING:
+   - Content must be dense to fit a Narrow Margin (0.5 inch) layout.
+   - NO empty lines between section text, horizontal separators,
+     and the following section header.
 
 2. CONTACT HEADER (CENTERED):
-   - Name centered at the top.
-   - Directly below: Location | Email | Phone | LinkedIn | GitHub (centered, single line)[cite: 68].
-   - Insert a horizontal line "__________________________________________________________________" immediately after the contact info.
+   - Candidate name centered at the top in larger bold font.
+   - Directly below (single centered line):
+     Location | Email | Phone | LinkedIn | GitHub
+   - Insert a horizontal line "---" immediately after contact info.
 
-3. SECTION HEADERS: 
-   - Use these EXACT titles in ALL CAPS and BOLD: 
-   - **PROFILE**, **EXPERIENCE:**, **EDUCATION**, **LEADERSHIP :**, **TECHNICAL SKILLS**, **ACADEMIC PROJECTS**, **ADDITIONAL CERTIFICATIONS**, and **Hobbies :**.
+3. SECTION HEADERS:
+   Use these EXACT titles in ALL CAPS and BOLD with no extra spaces or colons:
+   **PROFILE**
+   **EXPERIENCE**
+   **EDUCATION**
+   **LEADERSHIP**
+   **TECHNICAL SKILLS**
+   **ACADEMIC PROJECTS**
+   **CERTIFICATIONS**
+   **HOBBIES**
 
 4. HORIZONTAL SEPARATORS:
-   - Insert a full-width horizontal line "__________________________________________________________________" immediately after the contact header and after every section's content (as shown in the reference image).
+   - Insert "---" immediately after the contact header and after
+     every section's content block.
+   - No blank lines before or after the separator.
 
-5. SECTION STRUCTURE:
-   - EXPERIENCE & LEADERSHIP: **Organization – Location** (Bold)[cite: 75], then **Role | Dates** (Bold) on the next line[cite: 76], followed by compact bullet points.
-   - BOLDING: Bold key technical terms and metrics within the text (e.g., **30%**, **Python**, **SQL**, **95%**) to mirror the reference image.
-6. PROJECT TITLES (NEW RULE):
-   - Every project title within the **ACADEMIC PROJECTS** section MUST be in **BOLD ALL CAPS** (e.g., **GPT FROM SCRATCH**)[cite: 103].
-═══════════════════════════════════════
-CONTENT & LENGTH MANAGEMENT
-═══════════════════════════════════════
-- MAX LENGTH: 1 page. 
-- SMART PRUNING: You are REQUIRED to remove irrelevant academic projects or leadership bullets if needed to stay under 1.5 pages. Prioritize the most relevant 2-3 projects for the job description [cite: 102-130].
-- NO FABRICATION: Only use provided experience .
-- Preserve core metrics: 4.0 GPA [cite: 88], 30% query optimization [cite: 79], and 95% accuracy[cite: 78].
+5. EXPERIENCE & LEADERSHIP STRUCTURE:
+   - Line 1: **Organization – Location** (Bold)
+   - Line 2: **Role | Start Date – End Date** (Bold)
+   - Followed by compact bullet points using "-"
+   - Bold all key technical terms and metrics within bullets
+     (e.g., **Python**, **SQL**, **30%**, **95%**, **20+ clients**)
+
+6. ACADEMIC PROJECTS:
+   - Every project title MUST be in **BOLD ALL CAPS**
+     (e.g., **GPT FROM SCRATCH**, **SALES FORECASTING DASHBOARD**)
 
 ═══════════════════════════════════════
-OUTPUT FORMAT
+SECTION 3 — CONTENT & LENGTH RULES
 ═══════════════════════════════════════
-Return the response in this exact format:
+- MAX LENGTH: Strictly 1 page. Prune aggressively to fit.
+- SMART PRUNING: Remove the least relevant academic projects or leadership
+  bullets first. Prioritize the 2–3 projects most relevant to the JD.
+- NO FABRICATION: Only use information present in the provided resume.
+- PRESERVE THESE METRICS EXACTLY (do not alter or omit):
+    - 4.0 GPA
+    - 30% query optimization improvement
+    - 95% report accuracy improvement
+
+═══════════════════════════════════════
+SECTION 4 — OUTPUT FORMAT
+═══════════════════════════════════════
+Return your response in this exact structure:
 
 ---RESUME---
-[Full Tailored Resume]
+[Full tailored resume following all formatting rules above]
 
 ---KEYWORDS MATCHED---
-[List]
+[Bulleted list of JD keywords found and used in the resume]
 
 ---ATS SCORE---
-[Score & Explanation]
+Score: [X/100]
+
+Breakdown:
+- Keyword Match Rate (40 pts): [score] — [brief explanation]
+- Formatting & Readability (30 pts): [score] — [brief explanation]
+- Experience Relevance (30 pts): [score] — [brief explanation]
+
+Overall Verdict: [1–2 sentence summary of resume strength for this JD]
 """
 
 
-MODEL_NAME = "models/gemini-2.5-flash-lite"
+MODEL_NAME = "claude-sonnet-4-6"
 ALLOWED_FONT_SIZES = {8, 10, 12}
 INPUT_TOKEN_PRICE = 0.000001
 OUTPUT_TOKEN_PRICE = 0.000005
@@ -148,16 +329,8 @@ def compute_cost(usage: Any) -> Dict[str, Any]:
     output_tokens = 0
 
     if usage is not None:
-        input_tokens = int(
-            getattr(usage, "input_tokens", 0)
-            or getattr(usage, "prompt_token_count", 0)
-            or 0
-        )
-        output_tokens = int(
-            getattr(usage, "output_tokens", 0)
-            or getattr(usage, "candidates_token_count", 0)
-            or 0
-        )
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
 
     input_cost = input_tokens * INPUT_TOKEN_PRICE
     output_cost = output_tokens * OUTPUT_TOKEN_PRICE
@@ -173,15 +346,30 @@ def compute_cost(usage: Any) -> Dict[str, Any]:
     }
 
 
-def configure_gemini_client() -> None:
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+def get_anthropic_client() -> Anthropic:
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("Missing GEMINI_API_KEY environment variable.")
-    genai.configure(api_key=api_key)
+        raise RuntimeError("Missing ANTHROPIC_API_KEY environment variable.")
+    return Anthropic(api_key=api_key)
 
 
-def build_prompt(base_resume: str, job_description: str) -> str:
-    return "BASE_RESUME:\n" + base_resume + "\n\nJOB_DESCRIPTION:\n" + job_description
+def build_messages(base_resume: str, job_description: str) -> list[Dict[str, Any]]:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"BASE_RESUME:\n{base_resume}",
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {
+                    "type": "text",
+                    "text": f"JOB_DESCRIPTION:\n{job_description}",
+                },
+            ],
+        }
+    ]
 
 
 def sanitize_pdf_text(text: str) -> str:
@@ -342,18 +530,20 @@ def tailor_resume():
         return jsonify({"error": "Job description cannot be empty."}), 400
 
     try:
-        configure_gemini_client()
-        model = genai.GenerativeModel(
-            MODEL_NAME,
-            system_instruction=SYSTEM_PROMPT
+        client = get_anthropic_client()
+        response = client.messages.create(
+            model=MODEL_NAME,
+            max_tokens=1800,
+            system=SYSTEM_PROMPT,
+            messages=build_messages(base_resume, job_description),
         )
-        response = model.generate_content(
-            build_prompt(base_resume, job_description),
-            generation_config={"max_output_tokens": 1800},
-        )
-        response_text = (getattr(response, "text", "") or "").strip()
+        response_text = "".join(
+            block.text for block in getattr(response, "content", []) if block.type == "text"
+        ).strip()
         parsed = parse_model_output(response_text)
         costs = compute_cost(getattr(response, "usage_metadata", None))
+        if costs["input_tokens"] == 0 and costs["output_tokens"] == 0:
+            costs = compute_cost(getattr(response, "usage", None))
 
         return jsonify(
             {
@@ -368,7 +558,7 @@ def tailor_resume():
         error_message = str(exc).strip() or "Unknown API error."
         if "timeout" in error_message.lower():
             return (
-                jsonify({"error": "Gemini API timeout. Please try again."}),
+                jsonify({"error": "Anthropic API timeout. Please try again."}),
                 500,
             )
         return jsonify({"error": f"Failed to tailor resume: {error_message}"}), 500

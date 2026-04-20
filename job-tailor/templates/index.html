@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resume Tailor</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      color: #1b1f23;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 16px 24px;
+    }
+    h1 {
+      margin-bottom: 8px;
+    }
+    .description {
+      margin-top: 0;
+      color: #4b5563;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+    .full {
+      grid-column: 1 / -1;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      border: 1px solid #c9d1d9;
+      border-radius: 6px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 12px 0 6px;
+    }
+    input[type="range"] {
+      width: 180px;
+    }
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    button {
+      border: none;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #4b5563;
+    }
+    button:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+    .status {
+      min-height: 20px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    .error {
+      color: #b91c1c;
+    }
+    .success {
+      color: #15803d;
+    }
+    .meta {
+      margin-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    #previewBox {
+      min-height: 360px;
+      border: 1px solid #c9d1d9;
+      border-radius: 6px;
+      padding: 14px;
+      background: #fff;
+      overflow-wrap: anywhere;
+      font-family: "Times New Roman", Times, serif;
+      font-size: 10pt;
+      line-height: 1.3;
+    }
+    #previewBox > :nth-child(-n+2) {
+      text-align: center;
+      font-weight: 700;
+    }
+    #previewBox p {
+      margin: 0;
+    }
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Resume Tailor</h1>
+    <p class="description">Tailor your resume to each job posting with Claude, then export as PDF or DOCX.</p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Settings</h2>
+        <label for="baseResume">Base Resume</label>
+        <textarea id="baseResume" placeholder="Paste your base resume here..."></textarea>
+
+        <div class="row">
+          <label for="fontSizeSlider">Font Size</label>
+          <input id="fontSizeSlider" type="range" min="8" max="12" step="2" value="10">
+          <strong><span id="fontSizeValue">10</span>pt</strong>
+        </div>
+
+        <div class="btn-row">
+          <button id="saveSettingsBtn" type="button">Save Settings</button>
+        </div>
+        <p id="settingsStatus" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Job Description</h2>
+        <label for="jobDescription">Target Role Posting</label>
+        <textarea id="jobDescription" placeholder="Paste the full job description..."></textarea>
+
+        <div class="btn-row">
+          <button id="tailorBtn" type="button">Tailor Resume</button>
+          <button id="downloadPdfBtn" class="secondary" type="button" disabled>Download PDF</button>
+          <button id="downloadDocxBtn" class="secondary" type="button" disabled>Download DOCX</button>
+        </div>
+        <p id="tailorStatus" class="status"></p>
+
+        <div class="meta">
+          <div id="keywordsBox" class="meta-box">Keywords Matched: -</div>
+          <div id="atsScoreBox" class="meta-box">ATS Score: -</div>
+          <div id="costBox" class="meta-box">Estimated Cost: -</div>
+        </div>
+      </section>
+
+      <section class="card full">
+        <h2>Preview</h2>
+        <div id="previewBox">Generated resume will appear here.</div>
+      </section>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    const baseResumeEl = document.getElementById("baseResume");
+    const fontSizeSliderEl = document.getElementById("fontSizeSlider");
+    const fontSizeValueEl = document.getElementById("fontSizeValue");
+    const saveSettingsBtnEl = document.getElementById("saveSettingsBtn");
+    const settingsStatusEl = document.getElementById("settingsStatus");
+
+    const jobDescriptionEl = document.getElementById("jobDescription");
+    const tailorBtnEl = document.getElementById("tailorBtn");
+    const tailorStatusEl = document.getElementById("tailorStatus");
+
+    const downloadPdfBtnEl = document.getElementById("downloadPdfBtn");
+    const downloadDocxBtnEl = document.getElementById("downloadDocxBtn");
+    const previewBoxEl = document.getElementById("previewBox");
+    const keywordsBoxEl = document.getElementById("keywordsBox");
+    const atsScoreBoxEl = document.getElementById("atsScoreBox");
+    const costBoxEl = document.getElementById("costBox");
+
+    let generatedResume = "";
+
+    function selectedFontSize() {
+      return Number(fontSizeSliderEl.value) || 10;
+    }
+
+    function setStatus(element, message, isError = false) {
+      element.textContent = message;
+      element.className = "status " + (isError ? "error" : "success");
+    }
+
+    function refreshFontPreview() {
+      const size = selectedFontSize();
+      fontSizeValueEl.textContent = String(size);
+      previewBoxEl.style.fontSize = `${size}pt`;
+    }
+
+    function refreshTailorButtonState() {
+      tailorBtnEl.disabled = baseResumeEl.value.trim().length === 0;
+    }
+
+    function refreshDownloadButtons() {
+      const disabled = generatedResume.trim().length === 0;
+      downloadPdfBtnEl.disabled = disabled;
+      downloadDocxBtnEl.disabled = disabled;
+    }
+
+    async function loadSettings() {
+      try {
+        const response = await fetch("/settings");
+        const data = await response.json();
+
+        baseResumeEl.value = data.base_resume || "";
+        fontSizeSliderEl.value = String(data.font_size || 10);
+        refreshFontPreview();
+        refreshTailorButtonState();
+      } catch (error) {
+        setStatus(settingsStatusEl, "Failed to load settings.", true);
+      }
+    }
+
+    async function saveSettings() {
+      try {
+        const response = await fetch("/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base_resume: baseResumeEl.value,
+            font_size: selectedFontSize()
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to save settings.");
+        }
+        baseResumeEl.value = data.base_resume || baseResumeEl.value;
+        fontSizeSliderEl.value = String(data.font_size || selectedFontSize());
+        refreshFontPreview();
+        refreshTailorButtonState();
+        setStatus(settingsStatusEl, "Settings saved.");
+      } catch (error) {
+        setStatus(settingsStatusEl, error.message, true);
+      }
+    }
+
+    async function tailorResume() {
+      const baseResume = baseResumeEl.value.trim();
+      const jobDescription = jobDescriptionEl.value.trim();
+
+      if (!baseResume) {
+        setStatus(tailorStatusEl, "Base resume cannot be empty.", true);
+        return;
+      }
+      if (!jobDescription) {
+        setStatus(tailorStatusEl, "Job description cannot be empty.", true);
+        return;
+      }
+
+      tailorBtnEl.disabled = true;
+      setStatus(tailorStatusEl, "Generating tailored resume...");
+
+      try {
+        const response = await fetch("/tailor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base_resume: baseResume,
+            job_description: jobDescription
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Generation failed.");
+        }
+
+        generatedResume = data.resume || "";
+        const markdownResume = generatedResume.replace(/\\\*/g, "*");
+        previewBoxEl.innerHTML = generatedResume
+          ? marked.parse(markdownResume, { gfm: true, breaks: true })
+          : "<p>No resume returned.</p>";
+        keywordsBoxEl.textContent = `Keywords Matched: ${data.keywords_matched || "-"}`;
+        atsScoreBoxEl.textContent = `ATS Score: ${data.ats_score || "-"}`;
+        costBoxEl.textContent = `Estimated Cost: ${data.cost?.display || "-"} (input tokens: ${data.cost?.input_tokens ?? 0}, output tokens: ${data.cost?.output_tokens ?? 0})`;
+
+        refreshDownloadButtons();
+        setStatus(tailorStatusEl, "Resume tailored successfully.");
+      } catch (error) {
+        setStatus(tailorStatusEl, error.message, true);
+      } finally {
+        refreshTailorButtonState();
+      }
+    }
+
+    async function downloadFile(endpoint, fileName) {
+      if (!generatedResume.trim()) {
+        setStatus(tailorStatusEl, "Generate a resume before downloading.", true);
+        return;
+      }
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            resume_text: generatedResume,
+            font_size: selectedFontSize()
+          })
+        });
+
+        if (!response.ok) {
+          let message = "Download failed.";
+          try {
+            const payload = await response.json();
+            message = payload.error || message;
+          } catch (jsonError) {
+            const fallbackText = await response.text();
+            if (fallbackText && fallbackText.trim()) {
+              message = fallbackText.slice(0, 200);
+            }
+          }
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (error) {
+        setStatus(tailorStatusEl, error.message, true);
+      }
+    }
+
+    baseResumeEl.addEventListener("input", refreshTailorButtonState);
+    fontSizeSliderEl.addEventListener("input", refreshFontPreview);
+    saveSettingsBtnEl.addEventListener("click", saveSettings);
+    tailorBtnEl.addEventListener("click", tailorResume);
+    downloadPdfBtnEl.addEventListener("click", () => downloadFile("/download/pdf", "tailored_resume.pdf"));
+    downloadDocxBtnEl.addEventListener("click", () => downloadFile("/download/docx", "tailored_resume.docx"));
+
+    refreshFontPreview();
+    refreshTailorButtonState();
+    refreshDownloadButtons();
+    loadSettings();
+  </script>
+</body>
+</html>

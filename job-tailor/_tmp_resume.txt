@@ -1,0 +1,23 @@
+John Doe
+    New York | john@example.com | +1-555-123-4567 | linkedin.com/in/johndoe | github.com/johndoe
+__________________________________________________________________
+**PROFILE**
+Detail-oriented Data Analyst with a proven ability to build efficient reporting solutions using **Python** and **SQL**. Contributed to **ADP** by developing reports with **95%** accuracy and optimizing queries for a **30%** performance improvement. Seeking to leverage analytical skills to enhance data-driven decision-making.
+__________________________________________________________________
+**EXPERIENCE:**
+**ADP – New York**
+**Data Analyst | 2022-2024**
+*   Optimized **SQL** queries, resulting in a **30%** improvement in performance and reduced processing times.
+*   Enhanced reporting accuracy to **95%** through meticulous data validation and error correction.
+*   Developed and maintained **Python** scripts for data extraction, transformation, and loading (ETL) processes.
+*   Collaborated with stakeholders to understand reporting requirements and deliver actionable insights.
+__________________________________________________________________
+**EDUCATION**
+**Pace University – New York**
+**MS Computer Science | GPA 4.0 | 2024**
+__________________________________________________________________
+**TECHNICAL SKILLS**
+*   Programming Languages: **Python**, **SQL**
+*   Databases: PostgreSQL, MySQL
+*   Tools: Pandas, NumPy, Git
+__________________________________________________________________

@@ -421,23 +421,34 @@ def parse_model_output(text: str) -> Dict[str, str]:
     result = {"resume": "", "keywords": "", "ats_score": ""}
     cleaned = text.strip()
 
-    sections = [
-        ("---RESUME---", "resume"),
-        ("---KEYWORDS MATCHED---", "keywords"),
-        ("---ATS SCORE---", "ats_score"),
-    ]
+    resume_header = "---RESUME---"
+    keywords_header = "---KEYWORDS MATCHED---"
+    missing_header = "---MISSING KEYWORDS---"
+    ats_header = "---ATS SCORE---"
 
-    for idx, (header, key) in enumerate(sections):
-        if header not in cleaned:
-            continue
-        start = cleaned.find(header) + len(header)
-        if idx < len(sections) - 1:
-            next_header = sections[idx + 1][0]
-            end = cleaned.find(next_header, start)
-            chunk = cleaned[start:end if end != -1 else None]
-        else:
-            chunk = cleaned[start:]
-        result[key] = chunk.strip()
+    keywords_pos = cleaned.find(keywords_header)
+    missing_pos = cleaned.find(missing_header)
+    ats_pos = cleaned.find(ats_header)
+
+    resume_end_candidates = [pos for pos in (keywords_pos, missing_pos, ats_pos) if pos != -1]
+    resume_search_end = min(resume_end_candidates) if resume_end_candidates else len(cleaned)
+    resume_pos = cleaned.rfind(resume_header, 0, resume_search_end)
+    if resume_pos != -1:
+        resume_start = resume_pos + len(resume_header)
+        resume_end = min([pos for pos in resume_end_candidates if pos > resume_start], default=len(cleaned))
+        result["resume"] = cleaned[resume_start:resume_end].strip()
+
+    if keywords_pos != -1:
+        keywords_start = keywords_pos + len(keywords_header)
+        keywords_end = min(
+            [pos for pos in (missing_pos, ats_pos) if pos != -1 and pos > keywords_start],
+            default=len(cleaned),
+        )
+        result["keywords"] = cleaned[keywords_start:keywords_end].strip()
+
+    if ats_pos != -1:
+        ats_start = ats_pos + len(ats_header)
+        result["ats_score"] = cleaned[ats_start:].strip()
 
     if not result["resume"]:
         result["resume"] = cleaned
@@ -525,13 +536,25 @@ def split_markdown_bold_segments(text: str) -> list[tuple[str, bool]]:
 
 def normalize_resume_markup(text: str) -> str:
     normalized = text
+    normalized = normalized.replace("&nbsp;", " ")
+    normalized = normalized.replace("&amp;nbsp;", " ")
+    normalized = normalized.replace("&#160;", " ")
+    normalized = normalized.replace("&#xA0;", " ")
+    normalized = normalized.replace("&#xa0;", " ")
     normalized = re.sub(
         r"(?is)(?:<u>|&lt;u&gt;)\s*(.*?)\s*(?:</u>|&lt;/u&gt;)",
         r"**\1**",
         normalized,
     )
+    normalized = re.sub(
+        r"(?is)(?:<ins>|&lt;ins&gt;)\s*(.*?)\s*(?:</ins>|&lt;/ins&gt;)",
+        r"**\1**",
+        normalized,
+    )
     normalized = re.sub(r"(?i)</?u>", "", normalized)
     normalized = re.sub(r"(?i)&lt;/?u&gt;", "", normalized)
+    normalized = re.sub(r"(?i)</?ins>", "", normalized)
+    normalized = re.sub(r"(?i)&lt;/?ins&gt;", "", normalized)
     normalized = re.sub(r"\*{4,}\s*(.*?)\s*\*{4,}", r"**\1**", normalized)
     return normalized
 
